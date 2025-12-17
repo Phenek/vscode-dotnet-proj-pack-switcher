@@ -22,10 +22,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "vscode-dotnet-proj-pack-switcher.helloWorld",
-        "title": "Hello World"
-      },
-      {
         "command": "vscode-dotnet-proj-pack-switcher.createProjpack",
         "title": "VS Code - .NET Proj/Pack Switcher: Create projpack.json"
       },
@@ -94,8 +90,7 @@
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
-    "lint": "eslint src",
-    "test": "vscode-test"
+    "lint": "eslint src"
   },
   "dependencies": {
     "fast-xml-parser": "^5.0.0",

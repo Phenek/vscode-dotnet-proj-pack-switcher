@@ -28,39 +28,8 @@ export function activate(context: vscode.ExtensionContext) {
 	// Also show a brief notification to guide the user
 	vscode.window.showInformationMessage('VS Code - .NET Proj/Pack Switcher activated — check Output (VS Code - .NET Proj/Pack Switcher) or Developer Tools console for diagnostics.');
 
-	// Register existing sample command
-	const disposable = vscode.commands.registerCommand('vscode-dotnet-proj-pack-switcher.helloWorld', () => {
-		vscode.window.showInformationMessage('Hello World from VS Code - .NET Proj/Pack Switcher!');
-	});
-	context.subscriptions.push(disposable);
-
-	// Command to add configuration to projpack.json (works when file open or focused)
-	const addConfigCmd = vscode.commands.registerCommand('vscode-dotnet-proj-pack-switcher.projpack.addConfiguration', async () => {
-		const ed = vscode.window.activeTextEditor;
-		if (!ed || !ed.document.uri.fsPath.endsWith('.vscode/projpack.json')) {
-			vscode.window.showWarningMessage('Open .vscode/projpack.json to add a configuration.');
-			return;
-		}
-		try {
-			const doc = ed.document;
-			const text = doc.getText();
-			const json = text ? JSON.parse(text) : {};
-			if (!Array.isArray(json.configurations)) json.configurations = [];
-			json.configurations.push({ name: 'New configuration' });
-
-			const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(text.length));
-			const edit = new vscode.WorkspaceEdit();
-			edit.replace(doc.uri, fullRange, JSON.stringify(json, null, 2));
-			await vscode.workspace.applyEdit(edit);
-			await doc.save();
-			vscode.window.showInformationMessage('Configuration added.');
-		} catch (err) {
-			vscode.window.showErrorMessage(String(err));
-		}
-	});
-	context.subscriptions.push(addConfigCmd);
-
 	// Register VS Code - .NET Proj/Pack Switcher commands and UI
+	import('./commands/addConfiguration').then(mod => mod.registerAddConfiguration(context));
 	import('./commands/createProjpack').then(mod => mod.registerCreateProjpack(context));
 	import('./commands/switchToProjectRef').then(mod => mod.registerSwitchToProjectRef(context));
 	import('./commands/switchToPackageRef').then(mod => mod.registerSwitchToPackageRef(context));
@@ -71,4 +40,4 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() { }

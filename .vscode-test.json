@@ -1,0 +1,13 @@
+{
+  "extensionDevelopmentPath": ".",
+  "extensionTestsPath": "./out/test/suite/index.js",
+  "tests": [
+    {
+      "label": "all",
+      "files": [
+        "out/test/**/*.test.js",
+        "out/src/test/**/*.test.js"
+      ]
+    }
+  ]
+}

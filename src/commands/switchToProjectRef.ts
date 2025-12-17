@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { readProjpack } from '../config/projpack';
 import { listProjectsFromSln } from '../parsers/slnParser';
 
@@ -47,7 +48,9 @@ export async function switchToProjectRef(): Promise<void> {
     try {
       const raw = await vscode.workspace.fs.readFile(cUri);
       const xml = new TextDecoder().decode(raw);
-      const updated = applySwitchToProject(xml, cfg.configurations);
+      // compute csproj dir and pass it so project paths can be made relative to the csproj file
+      const csprojDir = path.dirname(cUri.fsPath);
+      const updated = applySwitchToProject(xml, cfg.configurations, csprojDir, root.uri.fsPath);
       if (updated !== xml) {
         await vscode.workspace.fs.writeFile(cUri, new TextEncoder().encode(updated));
         processed++;
@@ -105,10 +108,23 @@ export function replacePackageWithProjectLine(xml: string, packageName: string, 
   return out;
 }
 
-export function applySwitchToProject(xml: string, configurations: Array<{ packageName: string; packageVersion?: string; projectPath?: string; enabled?: boolean }>): string {
+export function applySwitchToProject(
+  xml: string,
+  configurations: Array<{ packageName: string; packageVersion?: string; projectPath?: string; enabled?: boolean }>,
+  csprojDir?: string,
+  rootFsPath?: string
+): string {
   return configurations.reduce((acc, conf) => {
     if (!conf.enabled) { return acc; }
     if (!conf.packageName || !conf.projectPath || !conf.packageVersion) { return acc; }
-    return replacePackageWithProjectLine(acc, conf.packageName, conf.packageVersion!, conf.projectPath!);
+
+    // if csprojDir and rootFsPath are provided, compute relative path from the csproj to the target project
+    let projectPath = conf.projectPath!;
+    if (csprojDir && rootFsPath) {
+      const targetAbs = path.resolve(rootFsPath, conf.projectPath!);
+      projectPath = path.relative(csprojDir, targetAbs);
+    }
+
+    return replacePackageWithProjectLine(acc, conf.packageName, conf.packageVersion!, projectPath);
   }, xml);
 }

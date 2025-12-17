@@ -56,6 +56,22 @@ suite('commands - exact line replacements', () => {
     assert.strictEqual(back.indexOf('ProjectReference'), -1, 'expected no ProjectReference after switching back to package');
   });
 
+  test('auto-prefix ../ when csproj is in subfolder and projectPath is root-relative', () => {
+    const fixture = path.join(__dirname, 'fixtures', 'src', 'MyProj', 'MyProj.csproj');
+    const xml = fs.readFileSync(fixture, 'utf8');
+    const cfg = [{
+      packageName: 'Project.Core.Test',
+      packageVersion: '1.2.27',
+      projectPath: 'Project-Core/backend/Project.Core.Test/Project.Core.Test.csproj',
+      enabled: true
+    }];
+    const rootFsPath = path.join(__dirname, '..', '..');
+    const swapped = applySwitchToProject(xml, cfg, path.dirname(fixture), rootFsPath);
+    const expectedRel = path.relative(path.dirname(fixture), path.resolve(rootFsPath, cfg[0].projectPath)).replace(/\//g, '\\');
+    assert.ok(swapped.indexOf(`<ProjectReference Include="${expectedRel}"`) !== -1);
+    assert.strictEqual(swapped.indexOf('<PackageReference Include="Project.Core.Test"'), -1);
+  });
+
   test('replaceProjectWithPackageLine handles expanded ProjectReference with nested elements', () => {
     const xml = '<ItemGroup>\n  <ProjectReference Include="..\\..\\..\\Project-Core\\backend\\Project.Core.Test\\Project.Core.Test.csproj">\n    <HintPath>lib\\some.dll</HintPath>\n  </ProjectReference>\n</ItemGroup>';
     const out = replaceProjectWithPackageLine(xml, '..\\..\\..\\Project-Core\\backend\\Project.Core.Test\\Project.Core.Test.csproj', 'Project.Core.Test', '1.2.27');

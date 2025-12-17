@@ -13,7 +13,7 @@ export class ProjpackEditor implements vscode.CustomTextEditorProvider {
 
   private static readonly viewType = 'vscode-dotnet-proj-pack-switcher.projpackEditor';
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: vscode.ExtensionContext) { }
 
   public async resolveCustomTextEditor(
     document: vscode.TextDocument,
@@ -57,7 +57,7 @@ export class ProjpackEditor implements vscode.CustomTextEditorProvider {
     try {
       const text = document.getText();
       const json = text ? JSON.parse(text) : {};
-      if (!Array.isArray(json.configurations)) json.configurations = [];
+      if (!Array.isArray(json.configurations)) { json.configurations = []; }
       json.configurations.push({ name: 'New configuration' });
 
       const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(text.length));
@@ -113,7 +113,7 @@ export class ProjpackEditor implements vscode.CustomTextEditorProvider {
 function getNonce() {
   let text = '';
   const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
+  for (let i = 0; i < 32; i++) { text += possible.charAt(Math.floor(Math.random() * possible.length)); }
   return text;
 }
 

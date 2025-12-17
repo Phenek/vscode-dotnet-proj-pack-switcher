@@ -13,15 +13,24 @@ export async function createProjpackJson(): Promise<void> {
   const projpackUri = vscode.Uri.joinPath(vscodeFolder, 'projpack.json');
 
   try {
+    // If projpack.json already exists, warn and do not overwrite
+    try {
+      await vscode.workspace.fs.stat(projpackUri);
+      vscode.window.showWarningMessage('.vscode/projpack.json already exists.');
+      return;
+    } catch {
+      // File not found — continue to create it
+    }
+
     await vscode.workspace.fs.createDirectory(vscodeFolder);
     const initial = {
       solutionPath: '',
       configurations: [
         {
-          packageName: 'Example.Package',
+          packageName: 'Example.Package.Test',
           packageVersion: '1.0.0',
           projectPath: 'path/to/project.csproj',
-          enabled: true
+          enabled: false
         }
       ] as Array<Record<string, unknown>>
     };
