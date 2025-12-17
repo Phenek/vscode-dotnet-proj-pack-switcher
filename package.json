@@ -1,0 +1,119 @@
+{
+  "name": "vscode-dotnet-proj-pack-switcher",
+  "publisher": "your-publisher",
+  "displayName": "VS Code - .NET Proj/Pack Switcher",
+  "description": "Seamlessly switch between NuGet Package References and Project References in your .csproj files with few clicks!",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.107.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:json",
+    "onLanguage:jsonc",
+    "workspaceContains:**/projpack.json",
+    "workspaceContains:**/.vscode/projpack.json",
+    "workspaceContains:**/*.csproj",
+    "onCustomEditor:vscode-dotnet-proj-pack-switcher.projpackEditor"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vscode-dotnet-proj-pack-switcher.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "vscode-dotnet-proj-pack-switcher.createProjpack",
+        "title": "VS Code - .NET Proj/Pack Switcher: Create projpack.json"
+      },
+      {
+        "command": "vscode-dotnet-proj-pack-switcher.switchToProjectRef",
+        "title": "VS Code - .NET Proj/Pack Switcher: Switch to Project Reference"
+      },
+      {
+        "command": "vscode-dotnet-proj-pack-switcher.switchToPackageRef",
+        "title": "VS Code - .NET Proj/Pack Switcher: Switch to Package Reference"
+      },
+      {
+        "command": "vscode-dotnet-proj-pack-switcher.projpack.addConfiguration",
+        "title": "VS Code - .NET Proj/Pack Switcher: Add configuration to projpack.json"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "vscode-dotnet-proj-pack-switcher.switchToProjectRef",
+          "when": "resourceLangId == 'xml' || resourceExtname == '.csproj'",
+          "group": "navigation"
+        },
+        {
+          "command": "vscode-dotnet-proj-pack-switcher.switchToPackageRef",
+          "when": "resourceLangId == 'xml' || resourceExtname == '.csproj'",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "vscode-dotnet-proj-pack-switcher.switchToProjectRef",
+          "when": "resourceExtname == '.sln' || resourceExtname == '.csproj'",
+          "group": "navigation"
+        },
+        {
+          "command": "vscode-dotnet-proj-pack-switcher.switchToPackageRef",
+          "when": "resourceExtname == '.sln' || resourceExtname == '.csproj'",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "vscode-dotnet-proj-pack-switcher.createProjpack",
+          "when": "resourceFilename == 'projpack.json'",
+          "group": "navigation"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "vscode-dotnet-proj-pack-switcher.projpackEditor",
+        "displayName": "Projpack JSON Editor",
+        "selector": [
+          { "filenamePattern": ".vscode/projpack.json" }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "package-vsix": "vsce package",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.0.0",
+    "xmlbuilder2": "^4.0.0",
+    "fast-glob": "^3.3.2",
+    "execa": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.107.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.48.1",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "ts-loader": "^9.5.4",
+    "webpack": "^5.103.0",
+    "webpack-cli": "^6.0.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
