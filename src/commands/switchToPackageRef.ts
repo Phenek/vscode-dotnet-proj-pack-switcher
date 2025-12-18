@@ -1,31 +1,11 @@
 import * as vscode from 'vscode';
 import { readProjpack } from '../config/projpack';
-import { listProjectsFromSln } from '../parsers/slnParser';
+import { findCsprojFilesFromSolution, removeProjectFromSolution } from '../utils/solutionUtils';
 
 import * as path from 'path';
 
 function pathToPattern(p: string): string {
   return p.split(/[\\/]/).map(seg => seg.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')).join('[\\\\/]');
-}
-
-async function findCsprojFilesFromSolution(root: vscode.WorkspaceFolder, solutionPath?: string): Promise<vscode.Uri[]> {
-  if (solutionPath) {
-    const sUri = vscode.Uri.joinPath(root.uri, solutionPath);
-    try {
-      const raw = await vscode.workspace.fs.readFile(sUri);
-      const text = new TextDecoder().decode(raw);
-      const projects = listProjectsFromSln(text);
-      return projects.map(p => {
-        const segments = p.split(/[\\/]/);
-        return vscode.Uri.joinPath(root.uri, ...segments);
-      });
-    } catch (err) {
-      return [];
-    }
-  }
-  // fallback: find all csproj files in workspace root
-  const matches = await vscode.workspace.findFiles('**/*.csproj', '**/bin/**');
-  return matches;
 }
 
 export async function switchToPackageRef(): Promise<void> {
@@ -56,6 +36,21 @@ export async function switchToPackageRef(): Promise<void> {
       if (updated !== xml) {
         await vscode.workspace.fs.writeFile(cUri, new TextEncoder().encode(updated));
         processed++;
+
+        // if solution is configured, remove projects corresponding to replaced items from the solution
+        if (cfg.solutionPath) {
+          for (const conf of cfg.configurations) {
+            if (!conf.enabled || !conf.projectPath || !conf.packageName) { continue; }
+            // respect PersistRefInSln configuration (support PascalCase and camelCase)
+            const persist = (conf as any).PersistRefInSln ?? (conf as any).persistRefInSln ?? false;
+            if (persist) { continue; }
+            try {
+              await removeProjectFromSolution(root.uri.fsPath, cfg.solutionPath, conf.projectPath!);
+            } catch (err) {
+              vscode.window.showErrorMessage(`Failed to remove project from solution: ${err}`);
+            }
+          }
+        }
       }
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to process ${cUri.path}: ${err}`);
@@ -106,3 +101,10 @@ export function applySwitchToPackage(xml: string, configurations: Array<{ packag
     return replaceProjectWithPackageLine(acc, conf.projectPath!, conf.packageName, conf.packageVersion);
   }, xml);
 }
+
+// exported helper used by switchToPackageRef to decide whether to remove the project from the solution
+export function shouldRemoveProjectFromSolution(conf: any): boolean {
+  return !((conf as any).PersistRefInSln ?? (conf as any).persistRefInSln ?? false);
+}
+export { removeProjectFromSolution } from '../utils/solutionUtils';
+export type { ExecFn } from '../utils/solutionUtils';

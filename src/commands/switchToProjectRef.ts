@@ -1,28 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { readProjpack } from '../config/projpack';
-import { listProjectsFromSln } from '../parsers/slnParser';
-
-
-async function findCsprojFilesFromSolution(root: vscode.WorkspaceFolder, solutionPath?: string): Promise<vscode.Uri[]> {
-  if (solutionPath) {
-    const sUri = vscode.Uri.joinPath(root.uri, solutionPath);
-    try {
-      const raw = await vscode.workspace.fs.readFile(sUri);
-      const text = new TextDecoder().decode(raw);
-      const projects = listProjectsFromSln(text);
-      return projects.map(p => {
-        const segments = p.split(/[\\/]/);
-        return vscode.Uri.joinPath(root.uri, ...segments);
-      });
-    } catch (err) {
-      return [];
-    }
-  }
-  // fallback: find all csproj files in workspace root
-  const matches = await vscode.workspace.findFiles('**/*.csproj', '**/bin/**');
-  return matches;
-}
+import { findCsprojFilesFromSolution, addProjectToSolution, removeProjectFromSolution } from '../utils/solutionUtils';
 
 export async function switchToProjectRef(): Promise<void> {
   const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -54,6 +33,20 @@ export async function switchToProjectRef(): Promise<void> {
       if (updated !== xml) {
         await vscode.workspace.fs.writeFile(cUri, new TextEncoder().encode(updated));
         processed++;
+
+        // ensure projects referenced by the replacement are present in the solution
+        if (cfg.solutionPath) {
+          for (const conf of cfg.configurations) {
+            if (!conf.enabled || !conf.projectPath || !conf.packageName || !conf.packageVersion) { continue; }
+            try {
+              const slnFolder = (conf as any).SlnFolder ?? (conf as any).slnFolder;
+              // pass undefined for execFn (optional) and provide slnFolder as 5th arg
+              await addProjectToSolution(root.uri.fsPath, cfg.solutionPath, conf.projectPath!, undefined, slnFolder);
+            } catch (err) {
+              vscode.window.showErrorMessage(`Failed to add project to solution: ${err}`);
+            }
+          }
+        }
       }
     } catch (err) {
       vscode.window.showErrorMessage(`Failed to process ${cUri.path}: ${err}`);
@@ -61,6 +54,9 @@ export async function switchToProjectRef(): Promise<void> {
   }
   vscode.window.showInformationMessage(`Switch to Project Reference: processed ${processed} project(s).`);
 }
+
+export { addProjectToSolution, removeProjectFromSolution } from '../utils/solutionUtils';
+export type { ExecFn } from '../utils/solutionUtils';
 
 export function registerSwitchToProjectRef(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.commands.registerCommand('vscode-dotnet-proj-pack-switcher.switchToProjectRef', switchToProjectRef));

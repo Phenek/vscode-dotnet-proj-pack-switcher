@@ -7,6 +7,9 @@ export type ProjPackConfig = {
     packageVersion?: string;
     projectPath?: string;
     enabled?: boolean;
+    // new options
+    PersistRefInSln?: boolean; // when true, do not remove project from solution when switching back to package refs
+    SlnFolder?: string; // optional solution folder to add the project into
   }>;
 };
 

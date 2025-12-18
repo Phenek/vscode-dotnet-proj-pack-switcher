@@ -40,7 +40,8 @@ const extensionConfig = {
       }
     ]
   },
-  devtool: 'nosources-source-map',
+  // Use a full source map during development so breakpoints in TypeScript bind correctly
+  devtool: 'source-map',
   infrastructureLogging: {
     level: "log", // enables logging required for problem matchers
   },

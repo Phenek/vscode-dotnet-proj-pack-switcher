@@ -17,6 +17,8 @@ export function registerAddConfiguration(context: vscode.ExtensionContext) {
                 packageName: 'Example.Package.Test',
                 packageVersion: '1.0.0',
                 projectPath: 'path/to/project.csproj',
+                PersistRefInSln: false,
+                SlnFolder: 'Libraries',
                 enabled: false
             });
 

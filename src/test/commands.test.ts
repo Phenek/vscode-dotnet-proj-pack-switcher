@@ -154,4 +154,72 @@ suite('commands - exact line replacements', () => {
     // PackageReference entry should be removed
     assert.strictEqual(out.indexOf('<PackageReference Include="Project.Core.Test"'), -1);
   });
+
+  test('addProjectToSolution invokes dotnet add when project missing', async () => {
+    const fixtures = path.join(__dirname, 'fixtures');
+    let called: any = null;
+    await (async () => {
+      await (require('../commands/switchToProjectRef') as any).addProjectToSolution(fixtures, 'sample.sln', 'src/NewProj/NewProj.csproj', async (cmd: string, args: string[]) => { called = { cmd, args }; });
+    })();
+    assert.ok(called, 'expected exec to be called');
+    assert.strictEqual(called.cmd, 'dotnet');
+    assert.strictEqual(called.args[0], 'sln');
+    // last two args should be ['add', 'path relative to solution']
+    assert.strictEqual(called.args[called.args.length - 2], 'add');
+  });
+
+  test('addProjectToSolution does nothing when project already present', async () => {
+    const fixtures = path.join(__dirname, 'fixtures');
+    let called = false;
+    await (require('../commands/switchToProjectRef') as any).addProjectToSolution(fixtures, 'sample.sln', 'src/MyProj/MyProj.csproj', async () => { called = true; });
+    assert.strictEqual(called, false);
+  });
+
+  test('addProjectToSolution passes --solution-folder when provided', async () => {
+    const fixtures = path.join(__dirname, 'fixtures');
+    let called: any = null;
+    await (require('../commands/switchToProjectRef') as any).addProjectToSolution(fixtures, 'sample.sln', 'src/NewProj/NewProj.csproj', async (cmd: string, args: string[]) => { called = { cmd, args }; }, 'MyFolder');
+    assert.ok(called, 'expected exec to be called');
+    assert.strictEqual(called.cmd, 'dotnet');
+    assert.ok(called.args.indexOf('--solution-folder') !== -1, 'expected --solution-folder in args');
+    assert.ok(called.args.indexOf('MyFolder') !== -1, 'expected folder name in args');
+  });
+
+  test('addProjectToSolution does not include --solution-folder when not provided', async () => {
+    const fixtures = path.join(__dirname, 'fixtures');
+    let called: any = null;
+    await (require('../commands/switchToProjectRef') as any).addProjectToSolution(fixtures, 'sample.sln', 'src/NewProj/NewProj.csproj', async (cmd: string, args: string[]) => { called = { cmd, args }; });
+    assert.ok(called, 'expected exec to be called');
+    assert.strictEqual(called.cmd, 'dotnet');
+    assert.strictEqual(called.args.indexOf('--solution-folder'), -1, 'did not expect --solution-folder in args');
+  });
+
+  test('removeProjectFromSolution invokes dotnet remove when project present', async () => {
+    const fixtures = path.join(__dirname, 'fixtures');
+    let called: any = null;
+    await (require('../commands/switchToPackageRef') as any).removeProjectFromSolution(fixtures, 'sample.sln', 'src/MyProj/MyProj.csproj', async (cmd: string, args: string[]) => { called = { cmd, args }; });
+    assert.ok(called, 'expected exec to be called');
+    assert.strictEqual(called.cmd, 'dotnet');
+    assert.strictEqual(called.args[0], 'sln');
+    assert.strictEqual(called.args[called.args.length - 2], 'remove');
+  });
+
+  test('removeProjectFromSolution does nothing when project missing', async () => {
+    const fixtures = path.join(__dirname, 'fixtures');
+    let called = false;
+    await (require('../commands/switchToPackageRef') as any).removeProjectFromSolution(fixtures, 'sample.sln', 'src/Nope/Nope.csproj', async () => { called = true; });
+    assert.strictEqual(called, false);
+  });
+
+  test('shouldRemoveProjectFromSolution respects PersistRefInSln (PascalCase)', () => {
+    const conf = { PersistRefInSln: true };
+    const shouldRemove = (require('../commands/switchToPackageRef') as any).shouldRemoveProjectFromSolution(conf);
+    assert.strictEqual(shouldRemove, false);
+  });
+
+  test('shouldRemoveProjectFromSolution respects persistRefInSln (camelCase)', () => {
+    const conf = { persistRefInSln: true };
+    const shouldRemove = (require('../commands/switchToPackageRef') as any).shouldRemoveProjectFromSolution(conf);
+    assert.strictEqual(shouldRemove, false);
+  });
 });

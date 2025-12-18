@@ -71,10 +71,10 @@ function activate(context) {
     Promise.resolve().then(() => __importStar(__webpack_require__(2))).then(mod => mod.registerAddConfiguration(context));
     Promise.resolve().then(() => __importStar(__webpack_require__(3))).then(mod => mod.registerCreateProjpack(context));
     Promise.resolve().then(() => __importStar(__webpack_require__(4))).then(mod => mod.registerSwitchToProjectRef(context));
-    Promise.resolve().then(() => __importStar(__webpack_require__(8))).then(mod => mod.registerSwitchToPackageRef(context));
-    Promise.resolve().then(() => __importStar(__webpack_require__(9))).then(mod => mod.initStatusBar(context));
+    Promise.resolve().then(() => __importStar(__webpack_require__(11))).then(mod => mod.registerSwitchToPackageRef(context));
+    Promise.resolve().then(() => __importStar(__webpack_require__(12))).then(mod => mod.initStatusBar(context));
     // Register custom editor for .vscode/projpack.json
-    Promise.resolve().then(() => __importStar(__webpack_require__(10))).then(mod => mod.registerProjpackEditor(context));
+    Promise.resolve().then(() => __importStar(__webpack_require__(13))).then(mod => mod.registerProjpackEditor(context));
 }
 // This method is called when your extension is deactivated
 function deactivate() { }
@@ -146,7 +146,9 @@ function registerAddConfiguration(context) {
                 packageName: 'Example.Package.Test',
                 packageVersion: '1.0.0',
                 projectPath: 'path/to/project.csproj',
-                enabled: true
+                PersistRefInSln: false,
+                SlnFolder: 'Libraries',
+                enabled: false
             });
             const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(text.length));
             const edit = new vscode.WorkspaceEdit();
@@ -232,7 +234,9 @@ async function createProjpackJson() {
                     packageName: 'Example.Package.Test',
                     packageVersion: '1.0.0',
                     projectPath: 'path/to/project.csproj',
-                    enabled: true
+                    PersistRefInSln: false,
+                    SlnFolder: 'Libraries',
+                    enabled: false
                 }
             ]
         };
@@ -290,6 +294,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.removeProjectFromSolution = exports.addProjectToSolution = void 0;
 exports.switchToProjectRef = switchToProjectRef;
 exports.registerSwitchToProjectRef = registerSwitchToProjectRef;
 exports.replacePackageWithProjectLine = replacePackageWithProjectLine;
@@ -297,27 +302,7 @@ exports.applySwitchToProject = applySwitchToProject;
 const vscode = __importStar(__webpack_require__(1));
 const path = __importStar(__webpack_require__(5));
 const projpack_1 = __webpack_require__(6);
-const slnParser_1 = __webpack_require__(7);
-async function findCsprojFilesFromSolution(root, solutionPath) {
-    if (solutionPath) {
-        const sUri = vscode.Uri.joinPath(root.uri, solutionPath);
-        try {
-            const raw = await vscode.workspace.fs.readFile(sUri);
-            const text = new TextDecoder().decode(raw);
-            const projects = (0, slnParser_1.listProjectsFromSln)(text);
-            return projects.map(p => {
-                const segments = p.split(/[\\/]/);
-                return vscode.Uri.joinPath(root.uri, ...segments);
-            });
-        }
-        catch (err) {
-            return [];
-        }
-    }
-    // fallback: find all csproj files in workspace root
-    const matches = await vscode.workspace.findFiles('**/*.csproj', '**/bin/**');
-    return matches;
-}
+const solutionUtils_1 = __webpack_require__(7);
 async function switchToProjectRef() {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -330,7 +315,7 @@ async function switchToProjectRef() {
         vscode.window.showErrorMessage('No configuration found. Create .vscode/projpack.json first.');
         return;
     }
-    const csprojUris = await findCsprojFilesFromSolution(root, cfg.solutionPath);
+    const csprojUris = await (0, solutionUtils_1.findCsprojFilesFromSolution)(root, cfg.solutionPath);
     if (!csprojUris || csprojUris.length === 0) {
         vscode.window.showErrorMessage('No .csproj files found in workspace or solution.');
         return;
@@ -346,6 +331,22 @@ async function switchToProjectRef() {
             if (updated !== xml) {
                 await vscode.workspace.fs.writeFile(cUri, new TextEncoder().encode(updated));
                 processed++;
+                // ensure projects referenced by the replacement are present in the solution
+                if (cfg.solutionPath) {
+                    for (const conf of cfg.configurations) {
+                        if (!conf.enabled || !conf.projectPath || !conf.packageName || !conf.packageVersion) {
+                            continue;
+                        }
+                        try {
+                            const slnFolder = conf.SlnFolder ?? conf.slnFolder;
+                            // pass undefined for execFn (optional) and provide slnFolder as 5th arg
+                            await (0, solutionUtils_1.addProjectToSolution)(root.uri.fsPath, cfg.solutionPath, conf.projectPath, undefined, slnFolder);
+                        }
+                        catch (err) {
+                            vscode.window.showErrorMessage(`Failed to add project to solution: ${err}`);
+                        }
+                    }
+                }
             }
         }
         catch (err) {
@@ -354,6 +355,9 @@ async function switchToProjectRef() {
     }
     vscode.window.showInformationMessage(`Switch to Project Reference: processed ${processed} project(s).`);
 }
+var solutionUtils_2 = __webpack_require__(7);
+Object.defineProperty(exports, "addProjectToSolution", ({ enumerable: true, get: function () { return solutionUtils_2.addProjectToSolution; } }));
+Object.defineProperty(exports, "removeProjectFromSolution", ({ enumerable: true, get: function () { return solutionUtils_2.removeProjectFromSolution; } }));
 function registerSwitchToProjectRef(context) {
     context.subscriptions.push(vscode.commands.registerCommand('vscode-dotnet-proj-pack-switcher.switchToProjectRef', switchToProjectRef));
 }
@@ -486,24 +490,6 @@ async function writeProjpack(root, config) {
 
 /***/ }),
 /* 7 */
-/***/ ((__unused_webpack_module, exports) => {
-
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.listProjectsFromSln = listProjectsFromSln;
-function listProjectsFromSln(text) {
-    const re = /Project\([^)]*\) = "[^"]+", "([^"]+\.csproj)"/gmi;
-    const matches = [];
-    let m;
-    while ((m = re.exec(text)) !== null) {
-        matches.push(m[1]);
-    }
-    return matches;
-}
-
-
-/***/ }),
-/* 8 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -541,17 +527,20 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.switchToPackageRef = switchToPackageRef;
-exports.registerSwitchToPackageRef = registerSwitchToPackageRef;
-exports.replaceProjectWithPackageLine = replaceProjectWithPackageLine;
-exports.applySwitchToPackage = applySwitchToPackage;
+exports.findCsprojFilesFromSolution = findCsprojFilesFromSolution;
+exports.addProjectToSolution = addProjectToSolution;
+exports.removeProjectFromSolution = removeProjectFromSolution;
 const vscode = __importStar(__webpack_require__(1));
-const projpack_1 = __webpack_require__(6);
-const slnParser_1 = __webpack_require__(7);
+const child_process_1 = __webpack_require__(8);
+const util = __importStar(__webpack_require__(9));
 const path = __importStar(__webpack_require__(5));
-function pathToPattern(p) {
-    return p.split(/[\\/]/).map(seg => seg.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')).join('[\\\\/]');
-}
+const slnParser_1 = __webpack_require__(10);
+const execFileAsync = util.promisify(child_process_1.execFile);
+/**
+ * Return all .csproj files referenced by the solution if solutionPath is provided,
+ * otherwise fall back to workspace-wide search. Shows a warning if the solution
+ * can't be read. (Was previously duplicated in two commands.)
+ */
 async function findCsprojFilesFromSolution(root, solutionPath) {
     if (solutionPath) {
         const sUri = vscode.Uri.joinPath(root.uri, solutionPath);
@@ -565,6 +554,7 @@ async function findCsprojFilesFromSolution(root, solutionPath) {
             });
         }
         catch (err) {
+            vscode.window.showWarningMessage(`Could not read solution '${solutionPath}': ${err}`);
             return [];
         }
     }
@@ -572,6 +562,196 @@ async function findCsprojFilesFromSolution(root, solutionPath) {
     const matches = await vscode.workspace.findFiles('**/*.csproj', '**/bin/**');
     return matches;
 }
+/**
+ * Add project to solution, using absolute path. Throws when the project file is missing.
+ * Shows warnings on failures while invoking dotnet but rethrows the error so callers
+ * can decide how to handle it.
+ */
+async function addProjectToSolution(rootFsPath, solutionPath, projectPath, execFn, slnFolder) {
+    if (!solutionPath) {
+        return;
+    }
+    const slnAbs = path.resolve(rootFsPath, solutionPath);
+    try {
+        const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(slnAbs));
+        const text = new TextDecoder().decode(raw);
+        // compute project path relative to solution dir and absolute path to the project
+        const projectAbs = path.resolve(rootFsPath, projectPath);
+        const projectRel = path.relative(path.dirname(slnAbs), projectAbs).replace(/\\/g, '/');
+        const filename = path.basename(projectAbs);
+        // if already referenced in sln, do nothing
+        if (text.indexOf(filename) !== -1 || text.indexOf(projectRel) !== -1) {
+            return;
+        }
+        // verify project file exists to give a clearer error early
+        try {
+            await vscode.workspace.fs.stat(vscode.Uri.file(projectAbs));
+        }
+        catch (err) {
+            vscode.window.showWarningMessage(`Project file not found: ${projectAbs}`);
+            throw new Error(`Project file not found: ${projectAbs}`);
+        }
+        // ensure dotnet runs with solution folder as cwd so relative paths resolve correctly
+        const run = execFn ?? (async (c, a) => { await execFileAsync(c, a, { cwd: path.dirname(slnAbs) }); });
+        // use absolute path for the project to avoid relative path resolution issues
+        const args = ['sln', slnAbs, 'add', projectAbs];
+        if (slnFolder) {
+            args.push('--solution-folder', slnFolder);
+        }
+        try {
+            await run('dotnet', args);
+            vscode.window.showInformationMessage(`Added project ${projectRel} to solution ${solutionPath}`);
+        }
+        catch (err) {
+            vscode.window.showWarningMessage(`Failed to add project ${projectRel} to solution ${solutionPath}: ${err}`);
+            throw err;
+        }
+    }
+    catch (err) {
+        // bubble up after warning where appropriate
+        throw err;
+    }
+}
+/**
+ * Remove project from solution. If the project is not present in the solution file,
+ * nothing is done. Failures invoking dotnet are warned about and rethrown.
+ */
+async function removeProjectFromSolution(rootFsPath, solutionPath, projectPath, execFn) {
+    if (!solutionPath) {
+        return;
+    }
+    const slnAbs = path.resolve(rootFsPath, solutionPath);
+    try {
+        const raw = await vscode.workspace.fs.readFile(vscode.Uri.file(slnAbs));
+        const text = new TextDecoder().decode(raw);
+        const projectAbs = path.resolve(rootFsPath, projectPath);
+        const projectRel = path.relative(path.dirname(slnAbs), projectAbs).replace(/\\/g, '/');
+        const filename = path.basename(projectAbs);
+        // if not present, nothing to do
+        if (text.indexOf(filename) === -1 && text.indexOf(projectRel) === -1) {
+            return;
+        }
+        // If project file exists, prefer using absolute path; otherwise fall back to relative path
+        const run = execFn ?? (async (c, a) => { await execFileAsync(c, a, { cwd: path.dirname(slnAbs) }); });
+        // Try to stat the project file to verify existence
+        try {
+            await vscode.workspace.fs.stat(vscode.Uri.file(projectAbs));
+            // use absolute path to remove
+            try {
+                await run('dotnet', ['sln', slnAbs, 'remove', projectAbs]);
+            }
+            catch (err) {
+                // fallback to relative path if absolute removal failed
+                try {
+                    await run('dotnet', ['sln', slnAbs, 'remove', projectRel]);
+                }
+                catch (err2) {
+                    vscode.window.showWarningMessage(`Failed to remove project ${projectRel} from solution ${solutionPath}: ${err2}`);
+                    throw err2;
+                }
+            }
+        }
+        catch (statErr) {
+            // project file missing on disk — attempt remove with relative path
+            try {
+                await run('dotnet', ['sln', slnAbs, 'remove', projectRel]);
+            }
+            catch (err) {
+                vscode.window.showWarningMessage(`Failed to remove project ${projectRel} from solution ${solutionPath}: ${err}`);
+                throw err;
+            }
+        }
+        vscode.window.showInformationMessage(`Removed project ${projectRel} from solution ${solutionPath}`);
+    }
+    catch (err) {
+        throw err;
+    }
+}
+
+
+/***/ }),
+/* 8 */
+/***/ ((module) => {
+
+module.exports = require("child_process");
+
+/***/ }),
+/* 9 */
+/***/ ((module) => {
+
+module.exports = require("util");
+
+/***/ }),
+/* 10 */
+/***/ ((__unused_webpack_module, exports) => {
+
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.listProjectsFromSln = listProjectsFromSln;
+function listProjectsFromSln(text) {
+    const re = /Project\([^)]*\) = "[^"]+", "([^"]+\.csproj)"/gmi;
+    const matches = [];
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        matches.push(m[1]);
+    }
+    return matches;
+}
+
+
+/***/ }),
+/* 11 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.removeProjectFromSolution = void 0;
+exports.switchToPackageRef = switchToPackageRef;
+exports.registerSwitchToPackageRef = registerSwitchToPackageRef;
+exports.replaceProjectWithPackageLine = replaceProjectWithPackageLine;
+exports.applySwitchToPackage = applySwitchToPackage;
+exports.shouldRemoveProjectFromSolution = shouldRemoveProjectFromSolution;
+const vscode = __importStar(__webpack_require__(1));
+const projpack_1 = __webpack_require__(6);
+const solutionUtils_1 = __webpack_require__(7);
+const path = __importStar(__webpack_require__(5));
+function pathToPattern(p) {
+    return p.split(/[\\/]/).map(seg => seg.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')).join('[\\\\/]');
+}
+// findCsprojFilesFromSolution moved to `src/utils/solutionUtils.ts` (keeps behavior and adds warnings on failure)
 async function switchToPackageRef() {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -584,7 +764,7 @@ async function switchToPackageRef() {
         vscode.window.showErrorMessage('No configuration found. Create .vscode/projpack.json first.');
         return;
     }
-    const csprojUris = await findCsprojFilesFromSolution(root, cfg.solutionPath);
+    const csprojUris = await (0, solutionUtils_1.findCsprojFilesFromSolution)(root, cfg.solutionPath);
     if (!csprojUris || csprojUris.length === 0) {
         vscode.window.showErrorMessage('No .csproj files found in workspace or solution.');
         return;
@@ -598,6 +778,25 @@ async function switchToPackageRef() {
             if (updated !== xml) {
                 await vscode.workspace.fs.writeFile(cUri, new TextEncoder().encode(updated));
                 processed++;
+                // if solution is configured, remove projects corresponding to replaced items from the solution
+                if (cfg.solutionPath) {
+                    for (const conf of cfg.configurations) {
+                        if (!conf.enabled || !conf.projectPath || !conf.packageName) {
+                            continue;
+                        }
+                        // respect PersistRefInSln configuration (support PascalCase and camelCase)
+                        const persist = conf.PersistRefInSln ?? conf.persistRefInSln ?? false;
+                        if (persist) {
+                            continue;
+                        }
+                        try {
+                            await (0, solutionUtils_1.removeProjectFromSolution)(root.uri.fsPath, cfg.solutionPath, conf.projectPath);
+                        }
+                        catch (err) {
+                            vscode.window.showErrorMessage(`Failed to remove project from solution: ${err}`);
+                        }
+                    }
+                }
             }
         }
         catch (err) {
@@ -649,10 +848,16 @@ function applySwitchToPackage(xml, configurations) {
         return replaceProjectWithPackageLine(acc, conf.projectPath, conf.packageName, conf.packageVersion);
     }, xml);
 }
+// exported helper used by switchToPackageRef to decide whether to remove the project from the solution
+function shouldRemoveProjectFromSolution(conf) {
+    return !(conf.PersistRefInSln ?? conf.persistRefInSln ?? false);
+}
+var solutionUtils_2 = __webpack_require__(7);
+Object.defineProperty(exports, "removeProjectFromSolution", ({ enumerable: true, get: function () { return solutionUtils_2.removeProjectFromSolution; } }));
 
 
 /***/ }),
-/* 9 */
+/* 12 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -703,7 +908,7 @@ function initStatusBar(context) {
 
 
 /***/ }),
-/* 10 */
+/* 13 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
