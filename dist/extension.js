@@ -71,10 +71,8 @@ function activate(context) {
     Promise.resolve().then(() => __importStar(__webpack_require__(2))).then(mod => mod.registerAddConfiguration(context));
     Promise.resolve().then(() => __importStar(__webpack_require__(3))).then(mod => mod.registerCreateProjpack(context));
     Promise.resolve().then(() => __importStar(__webpack_require__(4))).then(mod => mod.registerSwitchToProjectRef(context));
-    Promise.resolve().then(() => __importStar(__webpack_require__(11))).then(mod => mod.registerSwitchToPackageRef(context));
-    Promise.resolve().then(() => __importStar(__webpack_require__(12))).then(mod => mod.initStatusBar(context));
-    // Register custom editor for .vscode/projpack.json
-    Promise.resolve().then(() => __importStar(__webpack_require__(13))).then(mod => mod.registerProjpackEditor(context));
+    Promise.resolve().then(() => __importStar(__webpack_require__(10))).then(mod => mod.registerSwitchToPackageRef(context));
+    Promise.resolve().then(() => __importStar(__webpack_require__(11))).then(mod => mod.initStatusBar(context));
 }
 // This method is called when your extension is deactivated
 function deactivate() { }
@@ -527,6 +525,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.listProjectsFromSln = listProjectsFromSln;
 exports.findCsprojFilesFromSolution = findCsprojFilesFromSolution;
 exports.addProjectToSolution = addProjectToSolution;
 exports.removeProjectFromSolution = removeProjectFromSolution;
@@ -534,8 +533,17 @@ const vscode = __importStar(__webpack_require__(1));
 const child_process_1 = __webpack_require__(8);
 const util = __importStar(__webpack_require__(9));
 const path = __importStar(__webpack_require__(5));
-const slnParser_1 = __webpack_require__(10);
+const projpack_1 = __webpack_require__(6);
 const execFileAsync = util.promisify(child_process_1.execFile);
+function listProjectsFromSln(text) {
+    const re = /Project\([^)]*\) = "[^"]+", "([^"]+\.csproj)"/gmi;
+    const matches = [];
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        matches.push(m[1]);
+    }
+    return matches;
+}
 /**
  * Return all .csproj files referenced by the solution if solutionPath is provided,
  * otherwise fall back to workspace-wide search. Shows a warning if the solution
@@ -547,11 +555,42 @@ async function findCsprojFilesFromSolution(root, solutionPath) {
         try {
             const raw = await vscode.workspace.fs.readFile(sUri);
             const text = new TextDecoder().decode(raw);
-            const projects = (0, slnParser_1.listProjectsFromSln)(text);
-            return projects.map(p => {
-                const segments = p.split(/[\\/]/);
-                return vscode.Uri.joinPath(root.uri, ...segments);
-            });
+            const projects = listProjectsFromSln(text);
+            const uris = [];
+            // load projpack and build set of configured project absolute paths to exclude
+            const projpack = await (0, projpack_1.readProjpack)(root);
+            const configuredAbs = new Set();
+            if (projpack && Array.isArray(projpack.configurations)) {
+                for (const c of projpack.configurations) {
+                    if (c.projectPath) {
+                        const confAbs = path.resolve(root.uri.fsPath, c.projectPath);
+                        configuredAbs.add(path.normalize(confAbs));
+                    }
+                }
+            }
+            for (const p of projects) {
+                // normalize separators and resolve relative to workspace root
+                const segments = p.split(/[\\/]/).filter(s => s.length > 0);
+                const abs = path.resolve(root.uri.fsPath, ...segments);
+                const rel = path.relative(root.uri.fsPath, abs);
+                // skip if project lives outside the workspace root
+                if (rel.startsWith('..')) {
+                    continue;
+                }
+                // skip projects explicitly configured as projectPath in projpack
+                if (configuredAbs.has(path.normalize(abs))) {
+                    continue;
+                }
+                try {
+                    // only include existing files inside workspace
+                    await vscode.workspace.fs.stat(vscode.Uri.file(abs));
+                    uris.push(vscode.Uri.file(abs));
+                }
+                catch {
+                    // missing file — skip
+                }
+            }
+            return uris;
         }
         catch (err) {
             vscode.window.showWarningMessage(`Could not read solution '${solutionPath}': ${err}`);
@@ -683,24 +722,6 @@ module.exports = require("util");
 
 /***/ }),
 /* 10 */
-/***/ ((__unused_webpack_module, exports) => {
-
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.listProjectsFromSln = listProjectsFromSln;
-function listProjectsFromSln(text) {
-    const re = /Project\([^)]*\) = "[^"]+", "([^"]+\.csproj)"/gmi;
-    const matches = [];
-    let m;
-    while ((m = re.exec(text)) !== null) {
-        matches.push(m[1]);
-    }
-    return matches;
-}
-
-
-/***/ }),
-/* 11 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -751,7 +772,6 @@ const path = __importStar(__webpack_require__(5));
 function pathToPattern(p) {
     return p.split(/[\\/]/).map(seg => seg.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')).join('[\\\\/]');
 }
-// findCsprojFilesFromSolution moved to `src/utils/solutionUtils.ts` (keeps behavior and adds warnings on failure)
 async function switchToPackageRef() {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -857,7 +877,7 @@ Object.defineProperty(exports, "removeProjectFromSolution", ({ enumerable: true,
 
 
 /***/ }),
-/* 12 */
+/* 11 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 
@@ -897,164 +917,184 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.initStatusBar = initStatusBar;
 const vscode = __importStar(__webpack_require__(1));
+const path = __importStar(__webpack_require__(5));
+const projpack_1 = __webpack_require__(6);
+const solutionUtils_1 = __webpack_require__(7);
 function initStatusBar(context) {
     const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    status.text = 'ProjPack';
-    status.tooltip = 'VS Code - .NET Proj/Pack Switcher: Click to switch reference type';
-    status.command = 'workbench.action.showCommands';
-    status.show();
     context.subscriptions.push(status);
-}
-
-
-/***/ }),
-/* 13 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.ProjpackEditor = void 0;
-exports.registerProjpackEditor = registerProjpackEditor;
-const vscode = __importStar(__webpack_require__(1));
-class ProjpackEditor {
-    context;
-    static register(context) {
-        const provider = new ProjpackEditor(context);
-        const providerRegistration = vscode.window.registerCustomEditorProvider(ProjpackEditor.viewType, provider, { supportsMultipleEditorsPerDocument: false });
-        context.subscriptions.push(providerRegistration);
-    }
-    static viewType = 'vscode-dotnet-proj-pack-switcher.projpackEditor';
-    constructor(context) {
-        this.context = context;
-    }
-    async resolveCustomTextEditor(document, webviewPanel, _token) {
-        webviewPanel.webview.options = { enableScripts: true };
-        // Setup initial content in the webview
-        webviewPanel.webview.html = this.getHtmlForWebview(webviewPanel.webview);
-        // Send initial document text
-        const updateWebview = () => {
-            webviewPanel.webview.postMessage({ type: 'init', text: document.getText() });
-        };
-        // Respond to messages from the webview
-        webviewPanel.webview.onDidReceiveMessage(async (msg) => {
-            if (msg?.command === 'addConfiguration') {
-                await this.addConfigurationToDocument(document);
-                updateWebview();
+    // register command shown when the status item is clicked
+    context.subscriptions.push(vscode.commands.registerCommand('vscode-dotnet-proj-pack-switcher.chooseMode', async () => {
+        const pick = await vscode.window.showQuickPick(['Project Mode', 'Package Mode'], { placeHolder: 'Switch reference type for configured items' });
+        if (!pick) {
+            return;
+        }
+        if (pick === 'Project Mode') {
+            await vscode.commands.executeCommand('vscode-dotnet-proj-pack-switcher.switchToProjectRef');
+        }
+        else {
+            await vscode.commands.executeCommand('vscode-dotnet-proj-pack-switcher.switchToPackageRef');
+        }
+        // update status after a switch
+        scheduleUpdate();
+    }));
+    status.command = 'vscode-dotnet-proj-pack-switcher.chooseMode';
+    status.show();
+    // watchers to keep the status updated when relevant files change
+    const csprojWatcher = vscode.workspace.createFileSystemWatcher('**/*.csproj');
+    const projpackWatcher = vscode.workspace.createFileSystemWatcher('**/.vscode/projpack.json');
+    context.subscriptions.push(csprojWatcher, projpackWatcher);
+    csprojWatcher.onDidChange(() => scheduleUpdate());
+    csprojWatcher.onDidCreate(() => scheduleUpdate());
+    csprojWatcher.onDidDelete(() => scheduleUpdate());
+    projpackWatcher.onDidChange(() => scheduleUpdate());
+    projpackWatcher.onDidCreate(() => scheduleUpdate());
+    projpackWatcher.onDidDelete(() => scheduleUpdate());
+    // per-file watchers for csproj files returned by findCsprojFilesFromSolution
+    const perFileWatchers = new Map();
+    function updateCsprojFileWatchers(wf, uris) {
+        const wanted = new Set(uris.map(u => path.normalize(u.fsPath)));
+        // remove watchers no longer needed
+        for (const key of Array.from(perFileWatchers.keys())) {
+            if (!wanted.has(key)) {
+                const w = perFileWatchers.get(key);
+                w?.dispose();
+                perFileWatchers.delete(key);
             }
-        });
-        // Update when the document changes
-        const changeDocumentSubscription = vscode.workspace.onDidChangeTextDocument((e) => {
-            if (e.document.uri.toString() === document.uri.toString()) {
-                updateWebview();
+        }
+        // add missing watchers
+        for (const fsPath of wanted) {
+            if (perFileWatchers.has(fsPath)) {
+                continue;
             }
-        });
-        webviewPanel.onDidDispose(() => {
-            changeDocumentSubscription.dispose();
-        });
-        // Initial sync
-        updateWebview();
+            const rel = path.relative(wf.uri.fsPath, fsPath);
+            if (rel.startsWith('..')) {
+                continue;
+            } // safety: only watch inside workspace
+            const pattern = new vscode.RelativePattern(wf, rel);
+            const w = vscode.workspace.createFileSystemWatcher(pattern);
+            w.onDidChange(() => scheduleUpdate());
+            w.onDidCreate(() => scheduleUpdate());
+            w.onDidDelete(() => scheduleUpdate());
+            context.subscriptions.push(w);
+            perFileWatchers.set(fsPath, w);
+        }
     }
-    async addConfigurationToDocument(document) {
+    vscode.workspace.onDidSaveTextDocument((doc) => {
+        if (doc.fileName.endsWith('.csproj') || doc.fileName.endsWith('projpack.json')) {
+            scheduleUpdate();
+        }
+    }, null, context.subscriptions);
+    vscode.workspace.onDidChangeWorkspaceFolders(() => scheduleUpdate(), null, context.subscriptions);
+    // debounce helper
+    let timer = undefined;
+    function scheduleUpdate(delay = 200) {
+        if (timer) {
+            clearTimeout(timer);
+        }
+        timer = setTimeout(() => { updateStatus(); timer = undefined; }, delay);
+    }
+    // initial update
+    scheduleUpdate(0);
+    async function updateStatus() {
+        status.tooltip = 'VS Code - .NET Proj/Pack Switcher: Click to switch reference type';
+        status.text = 'ProjPack';
         try {
-            const text = document.getText();
-            const json = text ? JSON.parse(text) : {};
-            if (!Array.isArray(json.configurations)) {
-                json.configurations = [];
+            const wf = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+            if (!wf) {
+                status.text = '<Pack../>';
+                return;
             }
-            json.configurations.push({ name: 'New configuration' });
-            const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(text.length));
-            const edit = new vscode.WorkspaceEdit();
-            edit.replace(document.uri, fullRange, JSON.stringify(json, null, 2));
-            await vscode.workspace.applyEdit(edit);
-            await document.save();
-            vscode.window.showInformationMessage('Configuration added.');
+            const cfg = await (0, projpack_1.readProjpack)(wf);
+            if (!cfg) {
+                status.text = '<Pack../>';
+                return;
+            }
+            const enabled = (cfg.configurations || []).filter(c => c.enabled);
+            if (!enabled || enabled.length === 0) {
+                status.text = '<Pack../>';
+                return;
+            }
+            const csprojUris = await (0, solutionUtils_1.findCsprojFilesFromSolution)(wf, cfg.solutionPath);
+            // ensure we watch the solution-related csproj files so status updates when they change
+            updateCsprojFileWatchers(wf, csprojUris);
+            const csprojContents = await Promise.all(csprojUris.map(async (u) => {
+                try {
+                    const raw = await vscode.workspace.fs.readFile(u);
+                    return new TextDecoder().decode(raw);
+                }
+                catch {
+                    return '';
+                }
+            }));
+            // Compute per-config status (package / project / mixed / absent)
+            let projectCount = 0, packageCount = 0, absentCount = 0, mixedCount = 0;
+            for (const conf of enabled) {
+                const pname = conf.packageName;
+                const projPath = conf.projectPath || '';
+                const csprojName = path.basename(projPath);
+                let foundProject = false, foundPackage = false;
+                for (const xml of csprojContents) {
+                    if (!xml) {
+                        continue;
+                    }
+                    if (csprojName && new RegExp(`<ProjectReference\\b[^>]*Include\\s*=\\s*["'][^"']*${escapeRegExp(csprojName)}[^"']*["']`, 'i').test(xml)) {
+                        foundProject = true;
+                    }
+                    if (pname && new RegExp(`<PackageReference\\b[^>]*Include\\s*=\\s*["']${escapeRegExp(pname)}["']`, 'i').test(xml)) {
+                        foundPackage = true;
+                    }
+                }
+                if (foundProject && !foundPackage) {
+                    projectCount++;
+                }
+                else if (foundPackage && !foundProject) {
+                    packageCount++;
+                }
+                else if (foundPackage && foundProject) {
+                    mixedCount++;
+                }
+                else {
+                    absentCount++;
+                }
+            }
+            // Decide overall state with clear priority:
+            // - if any config is mixed -> Mix
+            // - else if any config is package-only -> Pack
+            // - else if any config is project-only -> Proj
+            // - otherwise default to Pack
+            let state = 'pack';
+            if (mixedCount > 0 || (packageCount > 0 && projectCount > 0)) {
+                state = 'mix';
+            }
+            else if (packageCount > 0) {
+                state = 'pack';
+            }
+            else if (projectCount > 0) {
+                state = 'proj';
+            }
+            else {
+                state = 'pack';
+            }
+            if (state === 'pack') {
+                status.text = '<Pack../>';
+            }
+            else if (state === 'proj') {
+                status.text = '<Proj.../>';
+            }
+            else {
+                status.text = '<Mix..../>';
+            }
+            status.tooltip += ` (${packageCount} package-only, ${projectCount} project-only, ${mixedCount} mixed, ${absentCount} absent)`;
         }
         catch (err) {
-            vscode.window.showErrorMessage(String(err));
+            status.text = '<Mix..../>';
+            status.tooltip = `Error checking state: ${err}`;
         }
     }
-    getHtmlForWebview(webview) {
-        const nonce = getNonce();
-        // Simple UI: show file content and a floating blue button bottom-right
-        return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <style>
-    body { font-family: var(--vscode-editor-font-family); color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); margin:0; padding:1rem; }
-    pre { white-space: pre-wrap; word-wrap: break-word; }
-    .button { position: fixed; right: 20px; bottom: 20px; background: #007acc; color: white; border: none; padding: 12px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-    .button:active { transform: translateY(1px); }
-  </style>
-</head>
-<body>
-  <pre id="content">Loading…</pre>
-  <button class="button" id="add">+ Add configuration</button>
-
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    const content = document.getElementById('content');
-    const btn = document.getElementById('add');
-    window.addEventListener('message', event => {
-      const msg = event.data;
-      if (msg?.type === 'init') {
-        content.textContent = msg.text || '';
-      }
-    });
-    btn.addEventListener('click', () => {
-      vscode.postMessage({ command: 'addConfiguration' });
-    });
-  </script>
-</body>
-</html>`;
-    }
 }
-exports.ProjpackEditor = ProjpackEditor;
-function getNonce() {
-    let text = '';
-    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 32; i++) {
-        text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
-}
-function registerProjpackEditor(context) {
-    ProjpackEditor.register(context);
+function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 

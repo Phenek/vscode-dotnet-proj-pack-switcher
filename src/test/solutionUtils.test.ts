@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { listProjectsFromSln } from '../parsers/slnParser';
+import { listProjectsFromSln } from '../utils/solutionUtils';
 
 suite('slnParser', () => {
   test('finds csproj paths in sample sln', () => {

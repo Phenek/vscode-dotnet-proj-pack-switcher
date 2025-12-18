@@ -2,11 +2,21 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import * as util from 'util';
 import * as path from 'path';
-import { listProjectsFromSln } from '../parsers/slnParser';
+import { readProjpack } from '../config/projpack';
 
 const execFileAsync = util.promisify(execFile);
 
 export type ExecFn = (cmd: string, args: string[]) => Promise<void>;
+
+export function listProjectsFromSln(text: string): string[] {
+  const re = /Project\([^)]*\) = "[^"]+", "([^"]+\.csproj)"/gmi;
+  const matches: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    matches.push(m[1]);
+  }
+  return matches;
+}
 
 /**
  * Return all .csproj files referenced by the solution if solutionPath is provided,
@@ -20,10 +30,43 @@ export async function findCsprojFilesFromSolution(root: vscode.WorkspaceFolder, 
       const raw = await vscode.workspace.fs.readFile(sUri);
       const text = new TextDecoder().decode(raw);
       const projects = listProjectsFromSln(text);
-      return projects.map(p => {
-        const segments = p.split(/[\\/]/);
-        return vscode.Uri.joinPath(root.uri, ...segments);
-      });
+
+      const uris: vscode.Uri[] = [];
+
+      // load projpack and build set of configured project absolute paths to exclude
+      const projpack = await readProjpack(root);
+      const configuredAbs = new Set<string>();
+      if (projpack && Array.isArray(projpack.configurations)) {
+        for (const c of projpack.configurations) {
+          if (c.projectPath) {
+            const confAbs = path.resolve(root.uri.fsPath, c.projectPath);
+            configuredAbs.add(path.normalize(confAbs));
+          }
+        }
+      }
+
+      for (const p of projects) {
+        // normalize separators and resolve relative to workspace root
+        const segments = p.split(/[\\/]/).filter(s => s.length > 0);
+        const abs = path.resolve(root.uri.fsPath, ...segments);
+        const rel = path.relative(root.uri.fsPath, abs);
+
+        // skip if project lives outside the workspace root
+        if (rel.startsWith('..')) { continue; }
+
+        // skip projects explicitly configured as projectPath in projpack
+        if (configuredAbs.has(path.normalize(abs))) { continue; }
+
+        try {
+          // only include existing files inside workspace
+          await vscode.workspace.fs.stat(vscode.Uri.file(abs));
+          uris.push(vscode.Uri.file(abs));
+        } catch {
+          // missing file — skip
+        }
+      }
+
+      return uris;
     } catch (err) {
       vscode.window.showWarningMessage(`Could not read solution '${solutionPath}': ${err}`);
       return [];

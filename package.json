@@ -15,8 +15,7 @@
     "onLanguage:jsonc",
     "workspaceContains:**/projpack.json",
     "workspaceContains:**/.vscode/projpack.json",
-    "workspaceContains:**/*.csproj",
-    "onCustomEditor:vscode-dotnet-proj-pack-switcher.projpackEditor"
+    "workspaceContains:**/*.csproj"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -62,24 +61,8 @@
           "when": "resourceExtname == '.sln' || resourceExtname == '.csproj'",
           "group": "navigation"
         }
-      ],
-      "editor/title": [
-        {
-          "command": "vscode-dotnet-proj-pack-switcher.createProjpack",
-          "when": "resourceFilename == 'projpack.json'",
-          "group": "navigation"
-        }
       ]
-    },
-    "customEditors": [
-      {
-        "viewType": "vscode-dotnet-proj-pack-switcher.projpackEditor",
-        "displayName": "Projpack JSON Editor",
-        "selector": [
-          { "filenamePattern": ".vscode/projpack.json" }
-        ]
-      }
-    ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

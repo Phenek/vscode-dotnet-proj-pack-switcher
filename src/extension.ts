@@ -34,8 +34,6 @@ export function activate(context: vscode.ExtensionContext) {
 	import('./commands/switchToProjectRef').then(mod => mod.registerSwitchToProjectRef(context));
 	import('./commands/switchToPackageRef').then(mod => mod.registerSwitchToPackageRef(context));
 	import('./ui/status').then(mod => mod.initStatusBar(context));
-	// Register custom editor for .vscode/projpack.json
-	import('./customEditors/projpackEditor').then(mod => mod.registerProjpackEditor(context));
 
 }
 
